@@ -1,8 +1,9 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const workoutController = require('../controllers/workoutController');
-const auth = require ('../middleware/authMiddleware');
+const workoutController = require("../controllers/workoutController");
+const auth = require("../middleware/authMiddleware");
 
-router.post('/start', auth, workoutController.createWorkout);
+router.post("/start", auth, workoutController.createWorkout);
+router.post("/log-set", auth, workoutController.logSet);
 
 module.exports = router;
