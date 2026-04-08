@@ -22,6 +22,7 @@ exports.createWorkout = async (req, res) => {
 
 exports.logSet = async (req, res) => {
   const { workoutId, exerciseId, weight, repetitions } = req.body;
+  const userId = req.user.id;
 
   try {
     let workoutExercise = await db.query(
@@ -36,22 +37,52 @@ exports.logSet = async (req, res) => {
       );
       workoutExercise = newWe;
     }
-
     const workoutExerciseId = workoutExercise.rows[0].Id;
 
     const volume = weight * repetitions;
-
     const newSet = await db.query(
       'INSERT INTO "WorkoutSet" ("WorkoutExerciseId", "Weight", "Repetitions", "Volume", "SetIndex") VALUES ($1, $2, $3, $4, 1) RETURNING *',
       [workoutExerciseId, weight, repetitions, volume],
     );
 
+    const progressQuery = await db.query(
+      'SELECT "ActiveMonsterTierId", "CurrentMonsterHP" FROM "UserProgress" WHERE "UserId" = $1',
+      [userId],
+    );
+    const progress = progressQuery.rows[0];
+
+    let earnedXP = Math.floor(volume / 10);
+    let responseMessage = "Série zaznamenána!";
+
+    if (progress && progress.ActiveMonsterTierId) {
+      const newHP = progress.CurrentMonsterHP - volume;
+
+      if (newHP <= 0) {
+        // MONSTRUM ZEMŘELO
+        earnedXP += 500; // Bonus
+        await db.query(
+          'UPDATE "UserProgress" SET "XP" = "XP" + $1, "CurrentMonsterHP" = 12000, "ActiveMonsterTierId" = 2 WHERE "UserId" = $2',
+          [earnedXP, userId],
+        );
+        responseMessage = `Kritický zásah za ${volume} damage! Monstrum padlo! Získáváš ${earnedXP} XP.`;
+      } else {
+        // MONSTRUM PŘEŽILO
+        await db.query(
+          'UPDATE "UserProgress" SET "XP" = "XP" + $1, "CurrentMonsterHP" = $2 WHERE "UserId" = $3',
+          [earnedXP, newHP, userId],
+        );
+        responseMessage = `Zasáhl jsi monstrum za ${volume} damage, zbývá mu ${newHP} HP, dostáváš ${earnedXP} XP.`;
+      }
+    }
+
     res.status(201).json({
-      message: "Série úspěšně zaznamenána!",
+      message: responseMessage,
       set: newSet.rows[0],
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Chyba při ukládání série" });
+    res
+      .status(500)
+      .json({ error: "Chyba při ukládání série a výpočtu damage" });
   }
 };
