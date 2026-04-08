@@ -21,7 +21,13 @@ exports.createWorkout = async (req, res) => {
 };
 
 exports.logSet = async (req, res) => {
-  const { workoutId, exerciseId, weight, repetitions } = req.body;
+  const {
+    workoutId,
+    exerciseId,
+    weight,
+    repetitions,
+    isFightingMonster = true,
+  } = req.body;
   const userId = req.user.id;
 
   try {
@@ -54,25 +60,32 @@ exports.logSet = async (req, res) => {
     let earnedXP = Math.floor(volume / 10);
     let responseMessage = "Série zaznamenána!";
 
-    if (progress && progress.ActiveMonsterTierId) {
+    // FIGHT or FARMING
+    if (isFightingMonster && progress && progress.ActiveMonsterTierId) {
+      // FIGHT
       const newHP = progress.CurrentMonsterHP - volume;
 
       if (newHP <= 0) {
-        // MONSTRUM ZEMŘELO
-        earnedXP += 500; // Bonus
+        earnedXP += 500;
         await db.query(
           'UPDATE "UserProgress" SET "XP" = "XP" + $1, "CurrentMonsterHP" = 12000, "ActiveMonsterTierId" = 2 WHERE "UserId" = $2',
           [earnedXP, userId],
         );
-        responseMessage = `Kritický zásah za ${volume} damage! Monstrum padlo! Získáváš ${earnedXP} XP.`;
+        responseMessage = `Kritický zásah! Monstrum padlo! Získáváš ${earnedXP} XP.`;
       } else {
-        // MONSTRUM PŘEŽILO
         await db.query(
           'UPDATE "UserProgress" SET "XP" = "XP" + $1, "CurrentMonsterHP" = $2 WHERE "UserId" = $3',
           [earnedXP, newHP, userId],
         );
         responseMessage = `Zasáhl jsi monstrum za ${volume} damage, zbývá mu ${newHP} HP, dostáváš ${earnedXP} XP.`;
       }
+    } else {
+      // FARMING
+      await db.query(
+        'UPDATE "UserProgress" SET "XP" = "XP" + $1 WHERE "UserId" = $2',
+        [earnedXP, userId],
+      );
+      responseMessage = `Série zaznamenána v režimu tréninku. Získáváš čistých ${earnedXP} XP.`;
     }
 
     res.status(201).json({
@@ -84,5 +97,32 @@ exports.logSet = async (req, res) => {
     res
       .status(500)
       .json({ error: "Chyba při ukládání série a výpočtu damage" });
+  }
+};
+
+// Training finish + save
+exports.finishWorkout = async (req, res) => {
+  const { workoutId, name, isPublic } = req.body;
+  const userId = req.user.id;
+
+  try {
+    const result = await db.query(
+      'UPDATE "Workout" SET "Name" = $1, "IsPublic" = $2, "EndTime" = NOW() WHERE "Id" = $3 AND "UserId" = $4 RETURNING *',
+      [name || "Můj trénink", isPublic || false, workoutId, userId],
+    );
+
+    if (result.rows.length === 0) {
+      return res
+        .status(404)
+        .json({ error: "Trénink nenalezen nebo k němu nemáš přístup." });
+    }
+
+    res.status(200).json({
+      message: "Trénink úspěšně ukončen a uložen!",
+      workout: result.rows[0],
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Chyba při ukončování tréninku" });
   }
 };
