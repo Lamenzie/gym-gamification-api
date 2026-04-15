@@ -6,5 +6,6 @@ const auth = require("../middleware/authMiddleware");
 router.post("/start", auth, workoutController.createWorkout);
 router.post("/log-set", auth, workoutController.logSet);
 router.put("/finish", auth, workoutController.finishWorkout);
+router.get("/history", auth, workoutController.getMyWorkouts);
 
 module.exports = router;

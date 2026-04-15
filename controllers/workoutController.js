@@ -58,34 +58,65 @@ exports.logSet = async (req, res) => {
     const progress = progressQuery.rows[0];
 
     let earnedXP = Math.floor(volume / 10);
-    let responseMessage = "Série zaznamenána!";
+    let responseMessage = "Série zaznamenána.";
 
-    // FIGHT or FARMING
-    if (isFightingMonster && progress && progress.ActiveMonsterTierId) {
-      // FIGHT
-      const newHP = progress.CurrentMonsterHP - volume;
+    let isNewPR = false;
+    const prQuery = await db.query(
+      'SELECT * FROM "PersonalRecord" WHERE "UserId" = $1 AND "ExerciseId" = $2',
+      [userId, exerciseId],
+    );
 
-      if (newHP <= 0) {
-        earnedXP += 500;
+    if (prQuery.rows.length === 0) {
+      isNewPR = true;
+      await db.query(
+        'INSERT INTO "PersonalRecord" ("UserId", "ExerciseId", "MaxWeight", "MaxVolume") VALUES ($1, $2, $3, $4)',
+        [userId, exerciseId, weight, volume],
+      );
+    } else {
+      const currentPR = prQuery.rows[0];
+      if (volume > currentPR.MaxVolume) {
+        isNewPR = true;
         await db.query(
-          'UPDATE "UserProgress" SET "XP" = "XP" + $1, "CurrentMonsterHP" = 12000, "ActiveMonsterTierId" = 2 WHERE "UserId" = $2',
+          'UPDATE "PersonalRecord" SET "MaxVolume" = $1, "MaxWeight" = GREATEST("MaxWeight", $2), "UpdatedAt" = NOW() WHERE "Id" = $3',
+          [volume, weight, currentPR.Id],
+        );
+      }
+    }
+
+    if (isFightingMonster && progress && progress.ActiveMonsterTierId) {
+      if (isNewPR) {
+        // PR = DMG
+        const newHP = progress.CurrentMonsterHP - volume;
+
+        if (newHP <= 0) {
+          earnedXP += 500;
+          await db.query(
+            'UPDATE "UserProgress" SET "XP" = "XP" + $1, "CurrentMonsterHP" = 12000, "ActiveMonsterTierId" = 2 WHERE "UserId" = $2',
+            [earnedXP, userId],
+          );
+          responseMessage = `🔥 NOVÉ PR! Monstrum dostalo ${volume} damage a padlo! Získáváš ${earnedXP} XP.`;
+        } else {
+          await db.query(
+            'UPDATE "UserProgress" SET "XP" = "XP" + $1, "CurrentMonsterHP" = $2 WHERE "UserId" = $3',
+            [earnedXP, newHP, userId],
+          );
+          responseMessage = `🔥 NOVÉ PR! Uštědřil jsi ${volume} damage, monstru zbývá ${newHP} HP. Získáváš ${earnedXP} XP.`;
+        }
+      } else {
+        // NO PR = NO DMG
+        await db.query(
+          'UPDATE "UserProgress" SET "XP" = "XP" + $1 WHERE "UserId" = $2',
           [earnedXP, userId],
         );
-        responseMessage = `Kritický zásah! Monstrum padlo! Získáváš ${earnedXP} XP.`;
-      } else {
-        await db.query(
-          'UPDATE "UserProgress" SET "XP" = "XP" + $1, "CurrentMonsterHP" = $2 WHERE "UserId" = $3',
-          [earnedXP, newHP, userId],
-        );
-        responseMessage = `Zasáhl jsi monstrum za ${volume} damage, zbývá mu ${newHP} HP, dostáváš ${earnedXP} XP.`;
+        responseMessage = `Série odcvičena. Nepřekonal jsi své maximum, monstrum se ti vysmálo (0 damage). Získáváš ${earnedXP} XP za snahu.`;
       }
     } else {
-      // FARMING
+      // FARMING XP
       await db.query(
         'UPDATE "UserProgress" SET "XP" = "XP" + $1 WHERE "UserId" = $2',
         [earnedXP, userId],
       );
-      responseMessage = `Série zaznamenána v režimu tréninku. Získáváš čistých ${earnedXP} XP.`;
+      responseMessage = `Série v režimu tréninku. Získáváš ${earnedXP} XP.`;
     }
 
     res.status(201).json({
@@ -124,5 +155,36 @@ exports.finishWorkout = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Chyba při ukončování tréninku" });
+  }
+};
+
+// History training (with Paging by 10 trainings)
+exports.getMyWorkouts = async (req, res) => {
+  const userId = req.user.id;
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const offset = (page - 1) * limit;
+
+  try {
+    const history = await db.query(
+      `
+            SELECT "Id", "Name", "EndTime", "IsPublic", "CreatedAt"
+            FROM "Workout"
+            WHERE "UserId" = $1 AND "EndTime" IS NOT NULL
+            ORDER BY "EndTime" DESC
+            LIMIT $2 OFFSET $3
+        `,
+      [userId, limit, offset],
+    );
+
+    res.status(200).json({
+      page: page,
+      limit: limit,
+      returnedCount: history.rows.length,
+      workouts: history.rows,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Chyba při načítání historie tréninků" });
   }
 };
