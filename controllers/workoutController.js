@@ -51,6 +51,7 @@ exports.logSet = async (req, res) => {
       [workoutExerciseId, weight, repetitions, volume],
     );
 
+    // RPG System
     const progressQuery = await db.query(
       'SELECT "ActiveMonsterTierId", "CurrentMonsterHP" FROM "UserProgress" WHERE "UserId" = $1',
       [userId],
@@ -60,64 +61,71 @@ exports.logSet = async (req, res) => {
     let earnedXP = Math.floor(volume / 10);
     let responseMessage = "Série zaznamenána.";
 
-    let isNewPR = false;
-    const prQuery = await db.query(
-      'SELECT * FROM "PersonalRecord" WHERE "UserId" = $1 AND "ExerciseId" = $2',
-      [userId, exerciseId],
-    );
-
-    if (prQuery.rows.length === 0) {
-      isNewPR = true;
-      await db.query(
-        'INSERT INTO "PersonalRecord" ("UserId", "ExerciseId", "MaxWeight", "MaxVolume") VALUES ($1, $2, $3, $4)',
-        [userId, exerciseId, weight, volume],
-      );
-    } else {
-      const currentPR = prQuery.rows[0];
-      if (volume > currentPR.MaxVolume) {
-        isNewPR = true;
-        await db.query(
-          'UPDATE "PersonalRecord" SET "MaxVolume" = $1, "MaxWeight" = GREATEST("MaxWeight", $2), "UpdatedAt" = NOW() WHERE "Id" = $3',
-          [volume, weight, currentPR.Id],
-        );
-      }
-    }
-
-    if (isFightingMonster && progress && progress.ActiveMonsterTierId) {
-      if (isNewPR) {
-        // PR = DMG
-        const newHP = progress.CurrentMonsterHP - volume;
-
-        if (newHP <= 0) {
-          earnedXP += 500;
-          await db.query(
-            'UPDATE "UserProgress" SET "XP" = "XP" + $1, "CurrentMonsterHP" = 12000, "ActiveMonsterTierId" = 2 WHERE "UserId" = $2',
-            [earnedXP, userId],
-          );
-          responseMessage = `🔥 NOVÉ PR! Monstrum dostalo ${volume} damage a padlo! Získáváš ${earnedXP} XP.`;
-        } else {
-          await db.query(
-            'UPDATE "UserProgress" SET "XP" = "XP" + $1, "CurrentMonsterHP" = $2 WHERE "UserId" = $3',
-            [earnedXP, newHP, userId],
-          );
-          responseMessage = `🔥 NOVÉ PR! Uštědřil jsi ${volume} damage, monstru zbývá ${newHP} HP. Získáváš ${earnedXP} XP.`;
-        }
+  // 3.A: Zjištění a zápis Personal Rekordu (PR)
+      let isNewPR = false;
+      let prType = ""; // Pro lepší hlášku v odpovědi
+      const prQuery = await db.query('SELECT * FROM "PersonalRecord" WHERE "UserId" = $1 AND "ExerciseId" = $2', [userId, exerciseId]);
+      
+      if (prQuery.rows.length === 0) {
+          // Cvičí to poprvé = automaticky je to PR
+          isNewPR = true;
+          prType = "První zápis";
+          await db.query('INSERT INTO "PersonalRecord" ("UserId", "ExerciseId", "MaxWeight", "MaxVolume") VALUES ($1, $2, $3, $4)', [userId, exerciseId, weight, volume]);
       } else {
-        // NO PR = NO DMG
-        await db.query(
-          'UPDATE "UserProgress" SET "XP" = "XP" + $1 WHERE "UserId" = $2',
-          [earnedXP, userId],
-        );
-        responseMessage = `Série odcvičena. Nepřekonal jsi své maximum, monstrum se ti vysmálo (0 damage). Získáváš ${earnedXP} XP za snahu.`;
+          const currentPR = prQuery.rows[0];
+          let newMaxWeight = currentPR.MaxWeight;
+          let newMaxVolume = currentPR.MaxVolume;
+          let shouldUpdatePR = false;
+
+          // 1. Zkouška na Max Váhu (Tvoje pravidlo č. 2)
+          if (weight > currentPR.MaxWeight) {
+              isNewPR = true;
+              shouldUpdatePR = true;
+              newMaxWeight = weight;
+              prType = "Nová Max Váha";
+          }
+
+          // 2. Zkouška na Max Objem s 50% pojistkou (Tvoje pravidlo č. 1)
+          if (volume > currentPR.MaxVolume && weight >= (currentPR.MaxWeight * 0.5)) {
+              isNewPR = true;
+              shouldUpdatePR = true;
+              newMaxVolume = volume;
+              prType = prType === "" ? "Nový Max Objem" : "Max Váha + Max Objem";
+          }
+
+          // Pokud padl jakýkoliv rekord, uložíme ho do DB
+          if (shouldUpdatePR) {
+              await db.query(
+                  'UPDATE "PersonalRecord" SET "MaxVolume" = $1, "MaxWeight" = $2, "UpdatedAt" = NOW() WHERE "Id" = $3', 
+                  [newMaxVolume, newMaxWeight, currentPR.Id]
+              );
+          }
       }
-    } else {
-      // FARMING XP
-      await db.query(
-        'UPDATE "UserProgress" SET "XP" = "XP" + $1 WHERE "UserId" = $2',
-        [earnedXP, userId],
-      );
-      responseMessage = `Série v režimu tréninku. Získáváš ${earnedXP} XP.`;
-    }
+
+      // 3.B: Samotný boj s podmínkou překonání PR
+      if (isFightingMonster && progress && progress.ActiveMonsterTierId) {
+          if (isNewPR) {
+              // PŘEKONAL JSI SE! DÁVÁŠ DAMAGE!
+              const newHP = progress.CurrentMonsterHP - volume;
+
+              if (newHP <= 0) {
+                  earnedXP += 500; 
+                  await db.query('UPDATE "UserProgress" SET "XP" = "XP" + $1, "CurrentMonsterHP" = 12000, "ActiveMonsterTierId" = 2 WHERE "UserId" = $2', [earnedXP, userId]);
+                  responseMessage = `🔥 PR (${prType})! Monstrum dostalo ${volume} damage a padlo! Získáváš ${earnedXP} XP.`;
+              } else {
+                  await db.query('UPDATE "UserProgress" SET "XP" = "XP" + $1, "CurrentMonsterHP" = $2 WHERE "UserId" = $3', [earnedXP, newHP, userId]);
+                  responseMessage = `🔥 PR (${prType})! Uštědřil jsi ${volume} damage, monstru zbývá ${newHP} HP. Získáváš ${earnedXP} XP.`;
+              }
+          } else {
+              // NEPŘEKONAL JSI PR - ŽÁDNÝ DAMAGE
+              await db.query('UPDATE "UserProgress" SET "XP" = "XP" + $1 WHERE "UserId" = $2', [earnedXP, userId]);
+              responseMessage = `Série odcvičena. Nepřekonal jsi své maximum, monstrum se ti vysmálo (0 damage). Získáváš ${earnedXP} XP za snahu.`;
+          }
+      } else {
+          // JEN FARMAŘÍ XP
+          await db.query('UPDATE "UserProgress" SET "XP" = "XP" + $1 WHERE "UserId" = $2', [earnedXP, userId]);
+          responseMessage = `Série v režimu tréninku. Získáváš ${earnedXP} XP.`;
+      }
 
     res.status(201).json({
       message: responseMessage,
