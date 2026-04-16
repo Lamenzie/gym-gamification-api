@@ -105,7 +105,7 @@ exports.logSet = async (req, res) => {
       // 3.B: Samotný boj s podmínkou překonání PR
       if (isFightingMonster && progress && progress.ActiveMonsterTierId) {
           if (isNewPR) {
-              // PŘEKONAL JSI SE! DÁVÁŠ DAMAGE!
+              // PR - DMG
               const newHP = progress.CurrentMonsterHP - volume;
 
               if (newHP <= 0) {
@@ -117,12 +117,12 @@ exports.logSet = async (req, res) => {
                   responseMessage = `🔥 PR (${prType})! Uštědřil jsi ${volume} damage, monstru zbývá ${newHP} HP. Získáváš ${earnedXP} XP.`;
               }
           } else {
-              // NEPŘEKONAL JSI PR - ŽÁDNÝ DAMAGE
+              // NO PR - NO DMG
               await db.query('UPDATE "UserProgress" SET "XP" = "XP" + $1 WHERE "UserId" = $2', [earnedXP, userId]);
               responseMessage = `Série odcvičena. Nepřekonal jsi své maximum, monstrum se ti vysmálo (0 damage). Získáváš ${earnedXP} XP za snahu.`;
           }
       } else {
-          // JEN FARMAŘÍ XP
+          // Just XP
           await db.query('UPDATE "UserProgress" SET "XP" = "XP" + $1 WHERE "UserId" = $2', [earnedXP, userId]);
           responseMessage = `Série v režimu tréninku. Získáváš ${earnedXP} XP.`;
       }
