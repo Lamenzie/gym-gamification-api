@@ -5,5 +5,9 @@ const auth = require("../middleware/authMiddleware");
 
 router.get("/profile", auth, userController.getProfile);
 router.put("/update", auth, userController.updateProfile);
+router.post('/buy-book', auth, userController.buyMagicBook);
+router.get('/bestiary', auth, userController.getBestiary);
+router.get('/library', auth, userController.getLibrary);
+router.post('/buy-book/:bookId', auth, userController.buyBook);
 
 module.exports = router;
