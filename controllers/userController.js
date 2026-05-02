@@ -1,11 +1,11 @@
 const db = require("../config/db");
 
 exports.getProfile = async (req, res) => {
-  const userId = req.user.id;
+    const userId = req.user.id;
 
-  try {
-    const profileQuery = await db.query(
-      `
+    try {
+        const profileQuery = await db.query(
+        `
             SELECT 
                 u."UserName",
                 up."AvatarConfig", 
@@ -19,64 +19,74 @@ exports.getProfile = async (req, res) => {
                 mt."BaseHP" as "MaxMonsterHP", 
                 mt."Label" as "MonsterTierName", 
                 m."Name" as "MonsterBaseName",
-                m."BaseType"
+                m."BaseType",
+                (SELECT COALESCE(SUM(e."BonusDMG"), 0) FROM "UserInventory" ui JOIN "Equipment" e ON ui."EquipmentId" = e."Id" WHERE ui."UserId" = up."UserId" AND ui."IsEquipped" = true) as "EquipDMG",
+                (SELECT COALESCE(SUM(e."BonusCoins"), 0) FROM "UserInventory" ui JOIN "Equipment" e ON ui."EquipmentId" = e."Id" WHERE ui."UserId" = up."UserId" AND ui."IsEquipped" = true) as "EquipCoins",
+                (SELECT COALESCE(SUM(e."BonusXP"), 0) FROM "UserInventory" ui JOIN "Equipment" e ON ui."EquipmentId" = e."Id" WHERE ui."UserId" = up."UserId" AND ui."IsEquipped" = true) as "EquipXP"
             FROM "UserProgress" up
             JOIN "User" u ON up."UserId" = u."Id"
             LEFT JOIN "MonsterTier" mt ON up."ActiveMonsterTierId" = mt."Id"
             LEFT JOIN "Monster" m ON mt."MonsterId" = m."Id"
             WHERE up."UserId" = $1
         `,
-      [userId],
-    );
+        [userId]
+        );
 
-    if (profileQuery.rows.length === 0) {
-      return res.status(404).json({ error: "Profil nenalezen" });
+        if (profileQuery.rows.length === 0) {
+            return res.status(404).json({ error: "Profil nenalezen" });
+        }
+
+        const profileData = profileQuery.rows[0];
+
+        // OPRAVA: Převod textu z PostgreSQL zpět na čísla, aby z toho React Native nedělal nuly!
+        profileData.EquipDMG = parseFloat(profileData.EquipDMG || 0);
+        profileData.EquipCoins = parseFloat(profileData.EquipCoins || 0);
+        profileData.EquipXP = parseFloat(profileData.EquipXP || 0);
+
+        res.status(200).json({
+            message: "Profil úspěšně načten",
+            profile: profileData,
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Chyba při načítání profilu" });
     }
-
-    res.status(200).json({
-      message: "Profil úspěšně načten",
-      profile: profileQuery.rows[0],
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Chyba při načítání profilu" });
-  }
 };
 
 // Profile update (Avatar, Nickname, Suplements)
 exports.updateProfile = async (req, res) => {
-  const userId = req.user.id;
-  const { userName, avatarConfig, dailySupplements } = req.body;
+    const userId = req.user.id;
+    const { userName, avatarConfig, dailySupplements } = req.body;
 
-  try {
-    if (userName) {
-      await db.query('UPDATE "User" SET "UserName" = $1 WHERE "Id" = $2', [
-        userName,
-        userId,
-      ]);
+    try {
+        if (userName) {
+        await db.query('UPDATE "User" SET "UserName" = $1 WHERE "Id" = $2', [
+            userName,
+            userId,
+        ]);
+        }
+
+        if (avatarConfig || dailySupplements !== undefined) {
+        await db.query(
+            `
+                    UPDATE "UserProgress" 
+                    SET "AvatarConfig" = COALESCE($1, "AvatarConfig"),
+                        "DailySupplements" = COALESCE($2, "DailySupplements")
+                    WHERE "UserId" = $3
+                `,
+            [
+            avatarConfig ? JSON.stringify(avatarConfig) : null,
+            dailySupplements,
+            userId,
+            ],
+        );
+        }
+
+        res.status(200).json({ message: "Profil úspěšně aktualizován!" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: "Chyba při aktualizaci profilu" });
     }
-
-    if (avatarConfig || dailySupplements !== undefined) {
-      await db.query(
-        `
-                UPDATE "UserProgress" 
-                SET "AvatarConfig" = COALESCE($1, "AvatarConfig"),
-                    "DailySupplements" = COALESCE($2, "DailySupplements")
-                WHERE "UserId" = $3
-            `,
-        [
-          avatarConfig ? JSON.stringify(avatarConfig) : null,
-          dailySupplements,
-          userId,
-        ],
-      );
-    }
-
-    res.status(200).json({ message: "Profil úspěšně aktualizován!" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Chyba při aktualizaci profilu" });
-  }
 };
 
 exports.buyMagicBook = async (req, res) => {
@@ -102,11 +112,11 @@ exports.buyMagicBook = async (req, res) => {
 
         // 2. Odečteme mince a přidáme knihu
         const updatedRes = await db.query(
-              `UPDATE "UserProgress" 
-              SET "Coins" = "Coins" - $1, "MagicBooks" = "MagicBooks" + 1 
-              WHERE "UserId" = $2 
-              RETURNING "Coins", "MagicBooks"`,
-              [BOOK_PRICE, userId]
+            `UPDATE "UserProgress" 
+            SET "Coins" = "Coins" - $1, "MagicBooks" = "MagicBooks" + 1 
+            WHERE "UserId" = $2 
+            RETURNING "Coins", "MagicBooks"`,
+            [BOOK_PRICE, userId]
         );
 
         await db.query('COMMIT');
