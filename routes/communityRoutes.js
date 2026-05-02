@@ -9,4 +9,10 @@ router.get("/profile/:id", auth, communityController.getPublicProfile);
 
 router.post("/follow/:id", auth, communityController.toggleFollow);
 
+router.get("/leaderboard", auth, communityController.getLeaderboard);
+
+router.get("/my-stats", auth, communityController.getMyCommunityStats);
+router.get("/followers", auth, communityController.getFollowers);
+router.get("/following", auth, communityController.getFollowing);
+
 module.exports = router;
