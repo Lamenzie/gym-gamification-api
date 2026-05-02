@@ -331,7 +331,7 @@ exports.getActiveMonster = async (req, res) => {
 
     try {
         const result = await db.query(`
-            SELECT up."CurrentMonsterHP", up."ActiveMonsterTierId", m."Name" as "MonsterName"
+            SELECT up."CurrentMonsterHP", up."ActiveMonsterTierId", m."Name" as "MonsterName", mt."HP" as "MaxHP"
             FROM "UserProgress" up
             LEFT JOIN "MonsterTier" mt ON up."ActiveMonsterTierId" = mt."Id"
             LEFT JOIN "Monster" m ON mt."MonsterId" = m."Id"
@@ -347,11 +347,27 @@ exports.getActiveMonster = async (req, res) => {
         res.status(200).json({
             monsterName: data.MonsterName || `Monstrum (Tier ${data.ActiveMonsterTierId})`,
             currentHp: data.CurrentMonsterHP,
-            maxHp: 5000 
+            maxHp: data.MaxHP || 5000 
         });
 
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Chyba při načítání monstra.' });
+    }
+};
+
+// --- 7. NAČTENÍ VŠECH CVIKŮ (Pro výběr do tréninku) ---
+exports.getAllExercises = async (req, res) => {
+    try {
+        const result = await db.query(`
+            SELECT "Id", "Name", "Description", "MuscleGroup"
+            FROM "Exercise" 
+            ORDER BY "Name" ASC
+        `);
+        
+        res.status(200).json({ exercises: result.rows });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Chyba při načítání seznamu cviků.' });
     }
 };
