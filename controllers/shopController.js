@@ -154,7 +154,7 @@ exports.buyEquipment = async (req, res) => {
     }
 };
 
-// --- 4. VYBAVENÍ PŘEDMĚTU (Equip) ---
+// --- 4. VYBAVENÍ A SUNDÁNÍ PŘEDMĚTU (Toggle Equip) ---
 exports.equipItem = async (req, res) => {
     const userId = req.user.id;
     const { equipmentId } = req.params;
@@ -162,18 +162,20 @@ exports.equipItem = async (req, res) => {
     try {
         await db.query('BEGIN');
 
-        // 1. Zjistíme, jestli hráč předmět vůbec vlastní a jakého je typu (WEAPON/ARMOR)
+        // 1. Zjistíme, jestli hráč předmět vůbec vlastní, jakého je typu a HLAVNĚ jestli ho má už na sobě
         const itemRes = await db.query(`
-            SELECT ui."Id", e."Type" 
+            SELECT ui."Id", ui."IsEquipped", e."Type" 
             FROM "UserInventory" ui
             JOIN "Equipment" e ON ui."EquipmentId" = e."Id"
             WHERE ui."UserId" = $1 AND ui."EquipmentId" = $2
         `, [userId, equipmentId]);
 
         if (itemRes.rows.length === 0) throw new Error('Tento předmět nevlastníš.');
+        
         const itemType = itemRes.rows[0].Type;
+        const isCurrentlyEquipped = itemRes.rows[0].IsEquipped; // Tady zjistíme aktuální stav!
 
-        // 2. Sundáme hráči předchozí předmět STEJNÉHO TYPU (aby neměl 2 zbraně najednou)
+        // 2. VŽDY sundáme hráči předchozí předmět STEJNÉHO TYPU (tím slot úplně vyčistíme)
         await db.query(`
             UPDATE "UserInventory" 
             SET "IsEquipped" = false 
@@ -182,19 +184,25 @@ exports.equipItem = async (req, res) => {
             )
         `, [userId, itemType]);
 
-        // 3. Nasadíme nový předmět
-        await db.query(`
-            UPDATE "UserInventory" 
-            SET "IsEquipped" = true 
-            WHERE "UserId" = $1 AND "EquipmentId" = $2
-        `, [userId, equipmentId]);
-
-        await db.query('COMMIT');
-        res.status(200).json({ message: 'Předmět úspěšně vybaven!' });
+        // 3. Nasadíme předmět ZPĚT POUZE v případě, že předtím nasazený NEBYL
+        if (!isCurrentlyEquipped) {
+            await db.query(`
+                UPDATE "UserInventory" 
+                SET "IsEquipped" = true 
+                WHERE "UserId" = $1 AND "EquipmentId" = $2
+            `, [userId, equipmentId]);
+            
+            await db.query('COMMIT');
+            return res.status(200).json({ message: 'Předmět úspěšně vybaven!' });
+        } else {
+            // Pokud UŽ BYL vybavený, tak jsme ho v kroku 2 jen sundali a jsme hotovi (Zůstaneš nahý/bez zbraně)
+            await db.query('COMMIT');
+            return res.status(200).json({ message: 'Předmět úspěšně sundán!' });
+        }
 
     } catch (err) {
         await db.query('ROLLBACK');
-        res.status(500).json({ error: err.message || 'Chyba při vybavování předmětu.' });
+        res.status(500).json({ error: err.message || 'Chyba při manipulaci s předmětem.' });
     }
 };
 

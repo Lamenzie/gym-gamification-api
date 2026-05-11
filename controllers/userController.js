@@ -8,6 +8,7 @@ exports.getProfile = async (req, res) => {
         `
             SELECT 
                 u."UserName",
+                up."BaseBodyId",
                 up."AvatarConfig", 
                 up."DailySupplements",
                 up."XP", 
@@ -38,7 +39,6 @@ exports.getProfile = async (req, res) => {
 
         const profileData = profileQuery.rows[0];
 
-        // OPRAVA: Převod textu z PostgreSQL zpět na čísla, aby z toho React Native nedělal nuly!
         profileData.EquipDMG = parseFloat(profileData.EquipDMG || 0);
         profileData.EquipCoins = parseFloat(profileData.EquipCoins || 0);
         profileData.EquipXP = parseFloat(profileData.EquipXP || 0);
@@ -88,6 +88,26 @@ exports.updateProfile = async (req, res) => {
         res.status(500).json({ error: "Chyba při aktualizaci profilu" });
     }
 };
+
+exports.updateAvatar = async (req, res) => {
+    const userId = req.user.id;
+    const { baseBodyId } = req.body;
+
+    if (!baseBodyId) {
+        return res.status(400).json({ error: "Chybí ID avatara." });
+    }
+
+    try {
+        await db.query(
+            `UPDATE "UserProgress" SET "BaseBodyId" = $1 WHERE "UserId" = $2`,
+            [baseBodyId, userId]
+        );
+        res.status(200).json({ message: "Avatar úspěšně změněn!", baseBodyId });
+    } catch (error) {
+        console.error("Chyba při updatu avatara:", error);
+        res.status(500).json({ error: "Nepodařilo se uložit avatara." });
+    }
+}
 
 exports.buyMagicBook = async (req, res) => {
     const userId = req.user.id;
