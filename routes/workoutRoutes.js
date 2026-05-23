@@ -7,10 +7,10 @@ router.post("/start", auth, workoutController.createWorkout);
 router.post("/log-set", auth, workoutController.logSet);
 router.put("/finish", auth, workoutController.finishWorkout);
 
-router.get("/history", auth, workoutController.getMyWorkouts);
-router.get('/history/:workoutId', auth, workoutController.getWorkoutDetail);
+router.get("/history", auth, workoutController.getHistory);
+router.get("/history/:workoutId", auth, workoutController.getWorkoutDetail);
 
-router.get('/active-monster', auth, workoutController.getActiveMonster);
+router.get("/active-monster", auth, workoutController.getActiveMonster);
 
 router.get("/exercises", auth, workoutController.getAllExercises);
 

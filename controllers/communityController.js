@@ -6,7 +6,9 @@ exports.searchUsers = async (req, res) => {
   const currentUserId = req.user.id;
 
   if (!searchQuery || searchQuery.length < 3) {
-    return res.status(400).json({ error: "Zadejte alespoň 3 znaky pro vyhledávání." });
+    return res
+      .status(400)
+      .json({ error: "Zadejte alespoň 3 znaky pro vyhledávání." });
   }
 
   try {
@@ -21,7 +23,7 @@ exports.searchUsers = async (req, res) => {
       LEFT JOIN "Follower" f ON f."FollowingId" = u."Id" AND f."FollowerId" = $2
       WHERE u."UserName" ILIKE $1 AND u."Id" != $2
       LIMIT 10`,
-      [`%${searchQuery}%`, currentUserId]
+      [`%${searchQuery}%`, currentUserId],
     );
 
     res.status(200).json({ results: users.rows });
@@ -43,19 +45,19 @@ exports.toggleFollow = async (req, res) => {
   try {
     const existingFollow = await db.query(
       'SELECT * FROM "Follower" WHERE "FollowerId" = $1 AND "FollowingId" = $2',
-      [followerId, followingId]
+      [followerId, followingId],
     );
 
     if (existingFollow.rows.length > 0) {
       await db.query(
         'DELETE FROM "Follower" WHERE "FollowerId" = $1 AND "FollowingId" = $2',
-        [followerId, followingId]
+        [followerId, followingId],
       );
       return res.status(200).json({ message: "Sledování zrušeno." });
     } else {
       await db.query(
         'INSERT INTO "Follower" ("FollowerId", "FollowingId") VALUES ($1, $2)',
-        [followerId, followingId]
+        [followerId, followingId],
       );
       return res.status(201).json({ message: "Nyní uživatele sleduješ!" });
     }
@@ -78,7 +80,7 @@ exports.getFeed = async (req, res) => {
       WHERE f."FollowerId" = $1 AND w."IsPublic" = true AND w."EndTime" IS NOT NULL
       ORDER BY w."EndTime" DESC
       LIMIT 20`,
-      [userId]
+      [userId],
     );
 
     res.status(200).json({ feed: feed.rows });
@@ -88,23 +90,45 @@ exports.getFeed = async (req, res) => {
   }
 };
 
-// 4. Public profile
+// 4. Public profile (Detail hráče pro Modal)
 exports.getPublicProfile = async (req, res) => {
   const targetUserId = req.params.id;
   try {
     const profile = await db.query(
-      `SELECT u."UserName", up."Level", up."XP", up."WeeklyStreak"
-      FROM "User" u
-      JOIN "UserProgress" up ON u."Id" = up."UserId"
-      WHERE u."Id" = $1`,
-      [targetUserId]
+      `SELECT 
+                u."UserName", 
+                up."Level", 
+                up."XP", 
+                up."WeeklyStreak",
+                up."BaseBodyId",
+                (SELECT COUNT(*) FROM "Follower" WHERE "FollowingId" = $1) as "FollowersCount",
+                (SELECT COUNT(*) FROM "Follower" WHERE "FollowerId" = $1) as "FollowingCount",
+                (SELECT COUNT(*) FROM "Workout" WHERE "UserId" = $1 AND "EndTime" IS NOT NULL) as "TotalWorkouts",
+                (SELECT e."ImageUrl" FROM "UserInventory" ui JOIN "Equipment" e ON ui."EquipmentId" = e."Id" WHERE ui."UserId" = $1 AND ui."IsEquipped" = true AND e."Type" = 'WEAPON' LIMIT 1) as "EquippedWeapon",
+                (SELECT e."ImageUrl" FROM "UserInventory" ui JOIN "Equipment" e ON ui."EquipmentId" = e."Id" WHERE ui."UserId" = $1 AND ui."IsEquipped" = true AND e."Type" = 'ARMOR' LIMIT 1) as "EquippedArmor"
+            FROM "User" u
+            JOIN "UserProgress" up ON u."Id" = up."UserId"
+            WHERE u."Id" = $1`,
+      [targetUserId],
     );
 
     if (profile.rows.length === 0) {
       return res.status(404).json({ error: "Uživatel nenalezen" });
     }
 
-    res.status(200).json({ profile: profile.rows[0] });
+    // Načtení odznaků hráče (zde byla chyba s userId, opraveno na targetUserId)
+    const badgesRes = await db.query(
+      `SELECT b."Id", b."Name", b."Description", b."Type"
+     FROM "UserBadge" ub
+     JOIN "Badge" b ON ub."BadgeId" = b."Id"
+     WHERE ub."UserId" = $1`,
+      [targetUserId],
+    );
+
+    res.status(200).json({
+      profile: profile.rows[0],
+      badges: badgesRes.rows,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Chyba při načítání cizího profilu" });
@@ -113,26 +137,27 @@ exports.getPublicProfile = async (req, res) => {
 
 // 5. Žebříček nejlepších hráčů (Leaderboard)
 exports.getLeaderboard = async (req, res) => {
-    try {
-        const leaderboard = await db.query(`
+  try {
+    const leaderboard = await db.query(`
             SELECT u."Id", u."UserName", up."Level", up."XP"
             FROM "User" u
             JOIN "UserProgress" up ON u."Id" = up."UserId"
             ORDER BY up."XP" DESC
             LIMIT 50
         `);
-        res.status(200).json({ leaderboard: leaderboard.rows });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Chyba při načítání žebříčku." });
-    }
+    res.status(200).json({ leaderboard: leaderboard.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Chyba při načítání žebříčku." });
+  }
 };
 
 // 6. Moje komunitní statistiky (Pro hlavní stránku Profilu)
 exports.getMyCommunityStats = async (req, res) => {
-    const userId = req.user.id;
-    try {
-        const stats = await db.query(`
+  const userId = req.user.id;
+  try {
+    const stats = await db.query(
+      `
             SELECT 
                 u."UserName", 
                 up."Level", 
@@ -142,51 +167,60 @@ exports.getMyCommunityStats = async (req, res) => {
             FROM "User" u
             LEFT JOIN "UserProgress" up ON u."Id" = up."UserId"
             WHERE u."Id" = $1
-        `, [userId]);
-        
-        res.status(200).json(stats.rows[0]);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Chyba při načítání statistik profilu." });
-    }
+        `,
+      [userId],
+    );
+
+    res.status(200).json(stats.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Chyba při načítání statistik profilu." });
+  }
 };
 
-// 7. Kdo mě sleduje (Followers)
+// 7. Kdo sleduje uživatele (Followers - já nebo někdo cizí)
 exports.getFollowers = async (req, res) => {
-    const userId = req.user.id;
-    try {
-        const followers = await db.query(`
+  // MAGIE: Vezme cizí ID, pokud existuje. Jinak vezme tvoje vlastní.
+  const userId = req.params.id || req.user.id;
+  try {
+    const followers = await db.query(
+      `
             SELECT u."Id", u."UserName", up."Level"
             FROM "Follower" f
             JOIN "User" u ON f."FollowerId" = u."Id"
             LEFT JOIN "UserProgress" up ON u."Id" = up."UserId"
             WHERE f."FollowingId" = $1
             ORDER BY u."UserName" ASC
-        `, [userId]);
-        
-        res.status(200).json({ users: followers.rows });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Chyba při načítání sledujících." });
-    }
+        `,
+      [userId],
+    );
+
+    res.status(200).json({ users: followers.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Chyba při načítání sledujících." });
+  }
 };
 
-// 8. Koho sleduji já (Following)
+// 8. Koho sleduje uživatel (Following - já nebo někdo cizí)
 exports.getFollowing = async (req, res) => {
-    const userId = req.user.id;
-    try {
-        const following = await db.query(`
+  const userId = req.params.id || req.user.id;
+  try {
+    const following = await db.query(
+      `
             SELECT u."Id", u."UserName", up."Level"
             FROM "Follower" f
             JOIN "User" u ON f."FollowingId" = u."Id"
             LEFT JOIN "UserProgress" up ON u."Id" = up."UserId"
             WHERE f."FollowerId" = $1
             ORDER BY u."UserName" ASC
-        `, [userId]);
-        
-        res.status(200).json({ users: following.rows });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Chyba při načítání sledovaných." });
-    }
+        `,
+      [userId],
+    );
+
+    res.status(200).json({ users: following.rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Chyba při načítání sledovaných." });
+  }
 };

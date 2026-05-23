@@ -21,7 +21,8 @@ app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/workouts", require("./routes/workoutRoutes"));
 app.use("/api/user", require("./routes/userRoutes"));
 app.use("/api/community", require("./routes/communityRoutes"));
-app.use('/api/shop', require("./routes/shopRoutes"));
+app.use("/api/shop", require("./routes/shopRoutes"));
+app.use("/api/supplements", require("./routes/supplementRoutes"));
 
 // Start Server
 app.listen(PORT, () => {
