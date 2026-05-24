@@ -263,45 +263,19 @@ exports.finishWorkout = async (req, res) => {
 exports.getHistory = async (req, res) => {
   try {
     const userId = req.user.id;
-
-    // Přečteme limit a offset z URL (pokud tam nejsou, dáme výchozí hodnoty)
     const limit = parseInt(req.query.limit) || 10;
     const offset = parseInt(req.query.offset) || 0;
 
     const historyRes = await db.query(
-      `
-            SELECT * FROM "Workout"
-            WHERE "UserId" = $1 AND "EndTime" IS NOT NULL
-            ORDER BY "EndTime" DESC
-            LIMIT $2 OFFSET $3
-        `,
+      `SELECT * FROM "Workout"
+       WHERE "UserId" = $1 AND "EndTime" IS NOT NULL
+       ORDER BY "EndTime" DESC
+       LIMIT $2 OFFSET $3`,
       [userId, limit, offset],
     );
 
-    // --- OPRAVA ČASOVÉHO PÁSMA PŘÍMO NA BACKENDU ---
-    // Supabase nám vrací UTC, my si ho tady natvrdo posuneme o 2 hodiny dopředu,
-    // takže frontend dostane rovnou správný lokální čas a nemusí nic počítat.
-    const fixedWorkouts = historyRes.rows.map((workout) => {
-      if (workout.CreatedAt) {
-        const d = new Date(workout.CreatedAt);
-        d.setHours(d.getHours() + 2);
-        workout.CreatedAt = d;
-      }
-      if (workout.EndTime) {
-        const d = new Date(workout.EndTime);
-        d.setHours(d.getHours() + 2);
-        workout.EndTime = d;
-      }
-      // Pojistka, kdyby databáze vracela sloupec "Date" místo CreatedAt
-      if (workout.Date) {
-        const d = new Date(workout.Date);
-        d.setHours(d.getHours() + 2);
-        workout.Date = d;
-      }
-      return workout;
-    });
-
-    res.json({ workouts: fixedWorkouts });
+    // Backend pošle čistá data z databáze, nic nepřičítáme!
+    res.json({ workouts: historyRes.rows });
   } catch (error) {
     console.error("Chyba historie:", error);
     res.status(500).json({ error: "Chyba při načítání historie" });
