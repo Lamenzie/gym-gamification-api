@@ -25,6 +25,6 @@ app.use("/api/shop", require("./routes/shopRoutes"));
 app.use("/api/supplements", require("./routes/supplementRoutes"));
 
 // Start Server
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server naslouchá na portu ${PORT}`);
 });

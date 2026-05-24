@@ -1,20 +1,19 @@
-const { Pool, types } = require("pg");
-require("dotenv").config();
+const { Pool } = require("pg");
 
-types.setTypeParser(1114, function (stringValue) {
-  return new Date(stringValue + "Z");
-});
-
+// Žádné tahání z .env, dáváme to tam natvrdo, aby neměl na výběr
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: "postgresql://postgres.jfcxgfdfdcoyhiewmzkj:GymGamificationFai2026@aws-1-eu-central-2.pooler.supabase.com:6543/postgres",
   ssl: {
     rejectUnauthorized: false,
   },
 });
 
-pool
-  .connect()
-  .then(() => console.log("🟢 Úspěšně připojeno k Supabase PostgreSQL!"))
-  .catch((err) => console.error("🔴 Chyba připojení k databázi:", err.stack));
+pool.on("connect", () => {
+  console.log("✅ Úspěšně připojeno k Supabase databázi!");
+});
+
+pool.on("error", (err) => {
+  console.error("🔴 Neočekávaná chyba databáze:", err);
+});
 
 module.exports = pool;

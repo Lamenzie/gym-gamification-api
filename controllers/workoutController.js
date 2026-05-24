@@ -107,47 +107,51 @@ exports.logSet = async (req, res) => {
     CurrentMonsterHP -= finalDamage;
     const newHpPct = CurrentMonsterHP / BaseHP;
 
-    const partialCoins = Math.round((CoinsReward || 0) * 0.25); // 25% z celkové odměny
+    const partialCoins = Math.round((CoinsReward || 0) * 0.25);
 
-    // Pokud útok srazil HP pod danou hranici, přidáme odměnu
     if (prevHpPct >= 0.75 && newHpPct < 0.75) coinsEarned += partialCoins;
     if (prevHpPct >= 0.5 && newHpPct < 0.5) coinsEarned += partialCoins;
     if (prevHpPct >= 0.25 && newHpPct < 0.25) coinsEarned += partialCoins;
 
-    // 5. Smrt monstra a UNIKÁTNÍ VÝBĚR NOVÉHO
+    // 5. Smrt monstra a CHYTRÝ VÝBĚR NOVÉHO (Postupný Tiering)
     if (CurrentMonsterHP <= 0) {
       isDead = true;
-      if (prevHpPct >= 0) coinsEarned += partialCoins; // Dorovnání zlaťáků za smrt
-      xpEarned += XPReward || 0; // Bonus XP za zabití
+      if (prevHpPct >= 0) coinsEarned += partialCoins; 
+      xpEarned += XPReward || 0; 
 
-      // Uložíme monstrum do bestiáře
       await db.query(
         `INSERT INTO "UserDefeatedMonster" ("UserId", "MonsterId", "TierLevel") 
-            VALUES ($1, $2, $3) 
-            ON CONFLICT ("UserId", "MonsterId", "TierLevel") DO NOTHING`,
+         VALUES ($1, $2, $3) 
+         ON CONFLICT ("UserId", "MonsterId", "TierLevel") DO NOTHING`,
         [userId, MonsterId, TierLevel],
       );
 
-      // Vybereme náhodné monstrum, které hráč JEŠTĚ NEPORAZIL
-      const newMonsterRes = await db.query(
-        `SELECT mt."Id", mt."BaseHP" 
-                 FROM "MonsterTier" mt
-                 LEFT JOIN "UserDefeatedMonster" udm ON mt."MonsterId" = udm."MonsterId" AND mt."TierLevel" = udm."TierLevel" AND udm."UserId" = $1
-                 WHERE udm."UserId" IS NULL
-                 ORDER BY RANDOM() LIMIT 1`,
-        [userId],
+      const availableTargetsRes = await db.query(
+        `WITH MaxDefeated AS (
+           SELECT "MonsterId", MAX("TierLevel") as "MaxTier"
+           FROM "UserDefeatedMonster"
+           WHERE "UserId" = $1
+           GROUP BY "MonsterId"
+         )
+         SELECT mt."Id", mt."BaseHP"
+         FROM "MonsterTier" mt
+         LEFT JOIN MaxDefeated md ON mt."MonsterId" = md."MonsterId"
+         WHERE 
+           (md."MaxTier" IS NULL AND mt."TierLevel" = 1)
+           OR 
+           (md."MaxTier" IS NOT NULL AND mt."TierLevel" = md."MaxTier" + 1)`,
+        [userId]
       );
 
-      if (newMonsterRes.rows.length > 0) {
-        ActiveMonsterTierId = newMonsterRes.rows[0].Id;
-        CurrentMonsterHP = newMonsterRes.rows[0].BaseHP;
+      if (availableTargetsRes.rows.length > 0) {
+        const randomIndex = Math.floor(Math.random() * availableTargetsRes.rows.length);
+        const nextMonster = availableTargetsRes.rows[randomIndex];
+
+        ActiveMonsterTierId = nextMonster.Id;
+        CurrentMonsterHP = nextMonster.BaseHP;
       } else {
-        // HRÁČ PORAZIL CELÝ BESTIÁŘ (I draka)!
-        // Zresetujeme mu historii poražených monster, aby mohl hrát "New Game +"
-        await db.query(
-          `DELETE FROM "UserDefeatedMonster" WHERE "UserId" = $1`,
-          [userId],
-        );
+        await db.query(`DELETE FROM "UserDefeatedMonster" WHERE "UserId" = $1`, [userId]);
+        
         const resetRes = await db.query(
           `SELECT "Id", "BaseHP" FROM "MonsterTier" ORDER BY "Id" ASC LIMIT 1`,
         );
@@ -156,11 +160,9 @@ exports.logSet = async (req, res) => {
       }
     }
 
-    // Aplikace bonusů z vybavení na celkový výdělek
     coinsEarned = Math.round(coinsEarned * (1 + EquipCoins));
     xpEarned = Math.round(xpEarned * (1 + EquipXP));
 
-    // 6. Aktualizace progrese hráče
     const totalXP = XP + xpEarned;
     const newLevel = Math.floor(Math.sqrt(totalXP / 100)) + 1;
     const isLevelUp = newLevel > Level;
@@ -177,7 +179,6 @@ exports.logSet = async (req, res) => {
       ],
     );
 
-    // 7. Uložení setu do historie
     let weResult = await db.query(
       `SELECT "Id" FROM "WorkoutExercise" WHERE "WorkoutId" = $1 AND "ExerciseId" = $2`,
       [workoutId, exerciseId],
@@ -231,7 +232,7 @@ exports.logSet = async (req, res) => {
 
 // --- 3. UKONČENÍ TRÉNINKU ---
 exports.finishWorkout = async (req, res) => {
-  const { workoutId, name, isPublic } = req.body;
+  const { workoutId, name, isPublic } = req.body; 
   const userId = req.user.id;
 
   try {
@@ -277,7 +278,30 @@ exports.getHistory = async (req, res) => {
       [userId, limit, offset],
     );
 
-    res.json({ workouts: historyRes.rows });
+    // --- OPRAVA ČASOVÉHO PÁSMA PŘÍMO NA BACKENDU ---
+    // Supabase nám vrací UTC, my si ho tady natvrdo posuneme o 2 hodiny dopředu,
+    // takže frontend dostane rovnou správný lokální čas a nemusí nic počítat.
+    const fixedWorkouts = historyRes.rows.map((workout) => {
+      if (workout.CreatedAt) {
+        const d = new Date(workout.CreatedAt);
+        d.setHours(d.getHours() + 2);
+        workout.CreatedAt = d;
+      }
+      if (workout.EndTime) {
+        const d = new Date(workout.EndTime);
+        d.setHours(d.getHours() + 2);
+        workout.EndTime = d;
+      }
+      // Pojistka, kdyby databáze vracela sloupec "Date" místo CreatedAt
+      if (workout.Date) {
+        const d = new Date(workout.Date);
+        d.setHours(d.getHours() + 2);
+        workout.Date = d;
+      }
+      return workout;
+    });
+
+    res.json({ workouts: fixedWorkouts });
   } catch (error) {
     console.error("Chyba historie:", error);
     res.status(500).json({ error: "Chyba při načítání historie" });
@@ -349,7 +373,6 @@ exports.getActiveMonster = async (req, res) => {
   const userId = req.user.id;
 
   try {
-    // Přidali jsme m."SpriteName" a mt."TierLevel", a hlídáme, aby se tahalo BaseHP
     const result = await db.query(
       `
               SELECT up."CurrentMonsterHP", up."ActiveMonsterTierId", 
@@ -374,8 +397,8 @@ exports.getActiveMonster = async (req, res) => {
         data.MonsterName || `Monstrum (Tier ${data.ActiveMonsterTierId})`,
       currentHp: data.CurrentMonsterHP,
       maxHp: data.MaxHP || 5000,
-      spriteName: data.SpriteName, // Frontend to díky tomuto vykreslí
-      tierLevel: data.TierLevel, // Frontend to díky tomuto vykreslí
+      spriteName: data.SpriteName, 
+      tierLevel: data.TierLevel, 
     });
   } catch (err) {
     console.error(err);
@@ -396,5 +419,23 @@ exports.getAllExercises = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Chyba při načítání seznamu cviků." });
+  }
+};
+
+// --- 8. ZÁPIS DO WARNING LOGU ---
+exports.logWarning = async (req, res) => {
+  const { workoutId, type, message, newValue } = req.body;
+  const userId = req.user.id;
+
+  try {
+    // Využije tabulku WarningLog
+    await db.query(
+      `INSERT INTO "WarningLog" ("UserId", "WorkoutId", "Type", "Message", "NewValue") VALUES ($1, $2, $3, $4, $5)`,
+      [userId, workoutId, type, message, newValue]
+    );
+    res.status(200).json({ success: true });
+  } catch (err) {
+    console.error("Chyba zápisu WarningLogu:", err);
+    res.status(500).json({ error: "Nelze uložit varování" });
   }
 };

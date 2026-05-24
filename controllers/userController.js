@@ -173,7 +173,7 @@ exports.getBestiary = async (req, res) => {
   try {
     // 1. Získáme všechna dostupná monstra
     const monstersRes = await db.query(`
-            SELECT "Id", "Name", "SpriteName"
+            SELECT "Id", "Name", "SpriteName", "Lore"
             FROM "Monster"
             ORDER BY "Id" ASC
         `);
