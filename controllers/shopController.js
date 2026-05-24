@@ -86,7 +86,7 @@ exports.getEquipmentShop = async (req, res) => {
 // --- 2. PLACENÝ REROLL ---
 exports.rerollShop = async (req, res) => {
     const userId = req.user.id;
-    const REROLL_COST = 150; 
+    const REROLL_COST = 50; 
 
     try {
         await db.query('BEGIN');
