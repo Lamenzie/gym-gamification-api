@@ -168,7 +168,8 @@ exports.logSet = async (req, res) => {
     const isLevelUp = newLevel > Level;
 
     await db.query(
-      `UPDATE "UserProgress" SET "CurrentMonsterHP" = $1, "XP" = $2, "Level" = $3, "ActiveMonsterTierId" = $4, "Coins" = "Coins" + $5 WHERE "UserId" = $6`,
+      `UPDATE "UserProgress" SET "CurrentMonsterHP" = $1, "XP" = $2, "Level" = $3, 
+      "ActiveMonsterTierId" = $4, "Coins" = "Coins" + $5 WHERE "UserId" = $6`,
       [
         CurrentMonsterHP,
         totalXP,
@@ -186,14 +187,16 @@ exports.logSet = async (req, res) => {
     let workoutExerciseId;
     if (weResult.rows.length === 0) {
       weResult = await db.query(
-        `INSERT INTO "WorkoutExercise" ("WorkoutId", "ExerciseId", "OrderIndex", "IsFightingMonster") VALUES ($1, $2, 1, true) RETURNING "Id"`,
+        `INSERT INTO "WorkoutExercise" ("WorkoutId", "ExerciseId", "OrderIndex", "IsFightingMonster") 
+        VALUES ($1, $2, 1, true) RETURNING "Id"`,
         [workoutId, exerciseId],
       );
     }
     workoutExerciseId = weResult.rows[0].Id;
 
     await db.query(
-      `INSERT INTO "WorkoutSet" ("WorkoutExerciseId", "SetIndex", "Weight", "Repetitions", "Volume", "AttackType", "MonsterDefense", "DamageDealt") VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`,
+      `INSERT INTO "WorkoutSet" ("WorkoutExerciseId", "SetIndex", "Weight", "Repetitions", 
+      "Volume", "AttackType", "MonsterDefense", "DamageDealt") VALUES ($1, 1, $2, $3, $4, $5, $6, $7)`,
       [
         workoutExerciseId,
         weight,
@@ -207,7 +210,8 @@ exports.logSet = async (req, res) => {
 
     const killedCount = isDead ? 1 : 0;
     await db.query(
-      `UPDATE "Workout" SET "TotalDamage" = COALESCE("TotalDamage", 0) + $1, "TotalXP" = COALESCE("TotalXP", 0) + $2, "TotalCoins" = COALESCE("TotalCoins", 0) + $3, "MonstersKilled" = COALESCE("MonstersKilled", 0) + $4 WHERE "Id" = $5`,
+      `UPDATE "Workout" SET "TotalDamage" = COALESCE("TotalDamage", 0) + $1, "TotalXP" = COALESCE("TotalXP", 0) + $2, 
+      "TotalCoins" = COALESCE("TotalCoins", 0) + $3, "MonstersKilled" = COALESCE("MonstersKilled", 0) + $4 WHERE "Id" = $5`,
       [finalDamage, xpEarned, coinsEarned, killedCount, workoutId],
     );
 
